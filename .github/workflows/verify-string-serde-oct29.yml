@@ -1,0 +1,50 @@
+name: Verify string SerDe input validation
+on:
+  push:
+    branches: [verify/string-serde-oct29]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Tests-first baseline
+        run: |
+          mkdir -p proof
+          for name in ArrayOfStringsSerDe ArrayOfUtf16StringsSerDe; do
+            git show d90033446ead96aea119ac2e0268a92b84ff9af9:src/main/java/org/apache/datasketches/common/$name.java > src/main/java/org/apache/datasketches/common/$name.java
+          done
+          set +e
+          mvn -B -Dtest=StringSerDeBoundsTest -DargLine=-Xmx128m test > proof/baseline.log 2>&1
+          result=$?
+          set -e
+          test "$result" -ne 0
+          grep -q 'StringSerDeBoundsTest' proof/baseline.log
+          grep -Eq 'NegativeArraySizeException|OutOfMemoryError' proof/baseline.log
+          for name in ArrayOfStringsSerDe ArrayOfUtf16StringsSerDe; do
+            git show 628ac813eb143c287ed9da5594e74f5222fc29be:src/main/java/org/apache/datasketches/common/$name.java > src/main/java/org/apache/datasketches/common/$name.java
+          done
+      - name: Focused regression and full verification
+        run: |
+          java -version 2>&1 | tee proof/runtime.txt
+          mvn -B -Dtest=StringSerDeBoundsTest test 2>&1 | tee proof/focused.log
+          mvn -B clean verify 2>&1 | tee proof/verify.log
+          git diff --exit-code
+          git rev-parse HEAD > proof/verification-head.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: string-serde-java
+          path: proof
